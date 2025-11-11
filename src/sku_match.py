@@ -112,15 +112,21 @@ async def calculate_similarity_for_single_product(
     candidate_brand = extract_brand_from_tokens(candidate_name, BRAND_DICTIONARY)
     similarity_tokens = jaccard_similarity(p_tokenize, candidate_tokens)
     similarity_brand = calculate_brand_similarity(p_brand, candidate_brand)
-    similarity = similarity_tokens * 0.7 + similarity_brand * 0.3
+    # similarity = similarity_tokens * 0.7 + similarity_brand * 0.3
+    similarity = similarity_tokens
+    if similarity_brand == 0.0:
+        similarity = 0.0
+
     result_str = f"{candidate_id}-{candidate_name}--{similarity:.4f}--{similarity_tokens:.4f}--{similarity_brand:.4f}"
-    return similarity, result_str
+    return similarity, candidate_row
 
 
-async def find_top3_similar_combined_async(product_name: str, candidate_df: pd.DataFrame,
+async def find_top3_similar_combined_async(row, candidate_df: pd.DataFrame,
                                            candidate_tokens_list: List[set],
                                            sem: asyncio.Semaphore) -> Tuple[str, str, str]:
     async with sem:
+        product_name = row.商品名称
+        price = row.原价
         p_name = clean_text(product_name)
         p_tokenize = await chinese_tokenize(p_name)
         p_brand = extract_brand_from_tokens(p_name, BRAND_DICTIONARY)
@@ -133,11 +139,17 @@ async def find_top3_similar_combined_async(product_name: str, candidate_df: pd.D
             ))
 
         results = await asyncio.gather(*tasks)
+        # 过滤相似度==0.0的记录
+        results = [r for r in results if r[0] > 0.0]
         sorted_results = sorted(results, key=lambda x: x[0], reverse=True)
 
         top3_combined = [r[1] for r in sorted_results[:3]]
+        # 过滤top3价格上下超出price 100%以上的项,并按价格差距排序
+        top3_combined = [r for r in top3_combined if abs(price - r.原价) < price * 1]
+        top3_combined = sorted(top3_combined, key=lambda x: abs(price - x.原价))
         while len(top3_combined) < 3:
             top3_combined.append("")
+
         return tuple(top3_combined)
 
 
@@ -185,7 +197,7 @@ async def process_batch(owner_df: pd.DataFrame, ele_df: pd.DataFrame, tokens: Li
 
     tasks = []
     for row in batch_df.itertuples(index=False):
-        tasks.append(find_top3_similar_combined_async(row.商品名称, ele_df, tokens, sem))
+        tasks.append(find_top3_similar_combined_async(row, ele_df, tokens, sem))
 
     batch_results = await asyncio.gather(*tasks)
     for t1, t2, t3 in batch_results:
@@ -228,8 +240,8 @@ async def main():
     # ele_df = pd.read_csv("../data/elme_sku_small.csv")
     # owner_df = pd.read_csv("../data/meituan_sku_small.csv")
 
-    owner_df = load_excel("../data/附件1.xlsx")
-    target_df = load_excel("../data/附件2.xlsx")
+    owner_df = load_excel("../data/美团-快驿点特价超市(虹桥店)全量商品信息20251109.xlsx")
+    target_df = load_excel("../data/美团-邻侣超市（虹桥中心店）全量商品信息20251109.xlsx")
     # 打印前几行数据
     print(owner_df.head())
     print(f"带匹配数据加载完成，共{len(owner_df)}条记录")
@@ -238,7 +250,6 @@ async def main():
 
     tokens = await preprocess_candidate_tokens(target_df)
     print("饿了么数据预处理完成")
-
 
     print("开始异步处理匹配任务...")
     top1_list, top2_list, top3_list = await process_owner_data_async(owner_df, target_df, tokens)

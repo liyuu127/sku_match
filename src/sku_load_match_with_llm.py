@@ -26,6 +26,11 @@ import functools
 MAX_CONCURRENCY = 100  # 控制最大并发任务数
 jieba.load_userdict("../data/jieba_dict.txt")
 
+# 设置langsmith环境配置
+import os
+os.environ["LANGSMITH_API_KEY"] = "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"
+os.environ["LANGSMITH_PROJECT"] = "sku_match"
+os.environ["LANGSMITH_TRACING"] = "true"
 
 # ====================================================
 # 工具函数
@@ -227,6 +232,7 @@ qwen3_8B = ChatOpenAI(
     model="Qwen/Qwen3-8B",
     base_url="https://api.siliconflow.cn/v1",
     api_key="sk-idaudysppselrwglygkbtatkregsbxhaxypaeulbfpavrals",
+
 )
 
 from pydantic import BaseModel, Field
@@ -256,7 +262,7 @@ top2_candidate：{top2_candidate}
 top3_candidate：{top3_candidate}
 </products_info>
 
-请使用以下键值以有效的 JSON 格式进行响应：
+请使用以下键值以有效的 JSON 格式进行响应,不要带有额外回车或标识符：
 "rank_index": int，Returns the index of the closest candidate product information. If it is top1_candidate, return 1; if it is top1_candidate, return 2; if it is top1_candidate, return 3; otherwise, return 0.,
 """
 
@@ -267,8 +273,10 @@ from langchain_core.messages import (
     HumanMessage,
 )
 
-
+REQUEST_INTERVAL=0.2
 async def llm_rank(product_name, top1, top2, top3) -> int:
+    await asyncio.sleep(REQUEST_INTERVAL)  # 限速控制
+
     print("正在处理：", product_name)
     prompt_format = rank_prompt.format(origin_product=product_name, top1_candidate=top1,
                                        top2_candidate=top2, top3_candidate=top3)
@@ -280,7 +288,11 @@ async def llm_rank(product_name, top1, top2, top3) -> int:
         # 判断index是否是0，1，2，3，  如果不是返回-1
         if index not in [0, 1, 2, 3]:
             return -1
-    except:
+    # 捕获所有错误，打印信息
+    except Exception as e:
+        import traceback
+        print(f"发生异常: {e}")
+        traceback.print_exc()
         return -1
     return index
 
@@ -302,24 +314,17 @@ async def process_llm_row(i, row, top1_list, top2_list, top3_list):
 async def main():
     print("开始加载数据...")
     start_time = time.time()
-    ele_df = pd.read_csv("../data/elme_sku_small.csv")
-    owner_df = pd.read_csv("../data/meituan_sku_small.csv")
+    # ele_df = pd.read_csv("../data/elme_sku_small.csv")
+    # owner_df = pd.read_csv("../data/meituan_sku_small.csv")
 
-    # ele_df = load_excel("./饿了么-京东便利店（虹桥中心店）全量商品数据20251110.xlsx")
+    owner_df = load_excel("../output/附件1_补充Top3相似商品（ID-名称组合）6888d2b1-c459-46e3-acd1-18727e8b35dd.xlsx")
     # 打印前几行数据
-    print(ele_df.head())
-    print(f"饿了么数据加载完成，共{len(ele_df)}条记录")
+    print(owner_df.head())
 
-    tokens = await preprocess_candidate_tokens(ele_df)
-    print("饿了么数据预处理完成")
+    owner_subset = owner_df.iloc[:200]
 
-    # owner_df = load_excel("./美团-快驿点特价超市(虹桥店)全量商品信息20251109.xlsx")
-    print(f"美团数据加载完成，共{len(owner_df)}条记录")
-
-    print("开始异步处理匹配任务...")
-    top1_list, top2_list, top3_list = await process_owner_data_async(owner_df, ele_df, tokens)
-    owner_subset = owner_df.iloc[:20]
-
+    # 从匹配结果中提取top1_list, top2_list, top3_list
+    top1_list, top2_list, top3_list = owner_subset['相似商品1（ID-名称）'], owner_subset['相似商品2（ID-名称）'], owner_subset['相似商品3（ID-名称）']
     # 创建任务列表
     tasks = [
         process_llm_row(i, row, top1_list, top2_list, top3_list)
@@ -332,11 +337,8 @@ async def main():
     for i, val in results:
         owner_df.at[i, '相似商品'] = val
 
-    owner_df['相似商品1（ID-名称）'] = top1_list
-    owner_df['相似商品2（ID-名称）'] = top2_list
-    owner_df['相似商品3（ID-名称）'] = top3_list
 
-    output_path = "../output/liyu附件1_补充Top3相似商品（ID-名称组合）" + str(uuid.uuid4()) + ".xlsx"
+    output_path = "../output/附件1_补充Top3相似商品（llm）" + str(uuid.uuid4()) + ".xlsx"
     await save_excel_async(owner_df, output_path)
 
     end_time = time.time()
