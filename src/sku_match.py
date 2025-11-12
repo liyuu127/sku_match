@@ -11,6 +11,10 @@ import time
 import asyncio
 import functools
 
+from pandas import Series
+
+from llm_match import process_llm_row
+
 # # Python 3.8 兼容 asyncio.to_thread
 # if not hasattr(asyncio, "to_thread"):
 #     async def to_thread(func, *args, **kwargs):
@@ -25,6 +29,7 @@ import functools
 # ====================================================
 MAX_CONCURRENCY = 100  # 控制最大并发任务数
 jieba.load_userdict("../data/jieba_dict.txt")
+LLM_MATCH = True
 
 
 # ====================================================
@@ -100,18 +105,32 @@ def jaccard_similarity(set1: set, set2: set) -> float:
     return intersection / union if union != 0 else 0.0
 
 
+# 计算条码字段是否一致，如果一致相似度为1
+def calculate_barcode_similarity(barcode1: str, barcode2: str) -> float:
+    # 判断是否为空
+    if not barcode1 or not barcode2:
+        return 0.0
+    return 1.0 if barcode1 == barcode2 else 0.0
+
+
 # ====================================================
 # 相似度计算
 # ====================================================
 async def calculate_similarity_for_single_product(
-        p_name: str, p_tokenize: set, p_brand: str,
+        row, p_tokenize: set, p_brand: str,
         candidate_row: pd.Series, candidate_tokens: set
-) -> Tuple[float, str]:
+) -> tuple[float, Series]:
     candidate_id = candidate_row.商品ID
     candidate_name = candidate_row.商品名称
+    p_barcode = row.条码
+    candidate_barcode = candidate_row.条码
+    similarity_barcode = calculate_barcode_similarity(p_barcode, candidate_barcode)
+    if similarity_barcode == 1.0:
+        return 1.0, candidate_row
     candidate_brand = extract_brand_from_tokens(candidate_name, BRAND_DICTIONARY)
     similarity_tokens = jaccard_similarity(p_tokenize, candidate_tokens)
     similarity_brand = calculate_brand_similarity(p_brand, candidate_brand)
+
     # similarity = similarity_tokens * 0.7 + similarity_brand * 0.3
     similarity = similarity_tokens
     if similarity_brand == 0.0:
@@ -123,7 +142,7 @@ async def calculate_similarity_for_single_product(
 
 async def find_top3_similar_combined_async(row, candidate_df: pd.DataFrame,
                                            candidate_tokens_list: List[set],
-                                           sem: asyncio.Semaphore) -> Tuple[str, str, str]:
+                                           sem: asyncio.Semaphore):
     async with sem:
         product_name = row.商品名称
         price = row.原价
@@ -132,23 +151,27 @@ async def find_top3_similar_combined_async(row, candidate_df: pd.DataFrame,
         p_brand = extract_brand_from_tokens(p_name, BRAND_DICTIONARY)
 
         tasks = []
-        for idx, row in enumerate(candidate_df.itertuples(index=False)):
+        for idx, candidate_row in enumerate(candidate_df.itertuples(index=False)):
             candidate_tokens = candidate_tokens_list[idx]
             tasks.append(calculate_similarity_for_single_product(
-                p_name, p_tokenize, p_brand, row, candidate_tokens
+                row, p_tokenize, p_brand, candidate_row, candidate_tokens
             ))
 
         results = await asyncio.gather(*tasks)
-        # 过滤相似度==0.0的记录
-        results = [r for r in results if r[0] > 0.0]
-        sorted_results = sorted(results, key=lambda x: x[0], reverse=True)
+        # 如果相似度为1.0，直接返回第一个相似度为1.0的记录，top2 top2填充为空
+        if any(r[0] == 1.0 for r in results):
+            top3_combined = [r[1] for r in results if r[0] == 1.0]
+        else:
+            # 过滤相似度==0.0的记录
+            results = [r for r in results if r[0] > 0.0]
+            sorted_results = sorted(results, key=lambda x: x[0], reverse=True)
 
-        top3_combined = [r[1] for r in sorted_results[:3]]
-        # 过滤top3价格上下超出price 100%以上的项,并按价格差距排序
-        top3_combined = [r for r in top3_combined if abs(price - r.原价) < price * 1]
-        top3_combined = sorted(top3_combined, key=lambda x: abs(price - x.原价))
+            top3_combined = [r[1] for r in sorted_results[:3]]
+            # 过滤top3价格上下超出price 5倍以上的项
+            top3_combined = [r for r in top3_combined if abs(price - r.原价) < price * 5]
+
         while len(top3_combined) < 3:
-            top3_combined.append("")
+            top3_combined.append(None)
 
         return tuple(top3_combined)
 
@@ -244,7 +267,7 @@ async def main():
     target_df = load_excel("../data/美团-邻侣超市（虹桥中心店）全量商品信息20251109.xlsx")
     # 打印前几行数据
     print(owner_df.head())
-    print(f"带匹配数据加载完成，共{len(owner_df)}条记录")
+    print(f"待匹配数据加载完成，共{len(owner_df)}条记录")
     print(target_df.head())
     print(f"匹配目标数据加载完成，共{len(target_df)}条记录")
 
@@ -258,7 +281,23 @@ async def main():
     owner_df['相似商品2（ID-名称）'] = top2_list
     owner_df['相似商品3（ID-名称）'] = top3_list
 
-    output_path = "../output/liyu附件1_补充Top3相似商品（ID-名称组合）" + str(uuid.uuid4()) + ".xlsx"
+    if LLM_MATCH:
+        print("开始LLM匹配...")
+        owner_subset = owner_df.iloc[:100]
+
+        # 创建任务列表
+        tasks = [
+            process_llm_row(i, row, top1_list, top2_list, top3_list)
+            for i, row in owner_subset.iterrows()
+        ]
+        # 并发执行
+        results = await asyncio.gather(*tasks)
+
+        # 更新 DataFrame
+        for i, val in results:
+            owner_df.at[i, '相似商品'] = val
+
+    output_path = "../output/补充Top3相似商品" + str(uuid.uuid4()) + ".xlsx"
     await save_excel_async(owner_df, output_path)
 
     end_time = time.time()
