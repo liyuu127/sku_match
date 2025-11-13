@@ -13,6 +13,7 @@ import functools
 
 from pandas import Series
 
+from Limter import RateLimiter
 from llm_match import process_llm_row
 
 # # Python 3.8 兼容 asyncio.to_thread
@@ -263,6 +264,8 @@ async def main():
     # ele_df = pd.read_csv("../data/elme_sku_small.csv")
     # owner_df = pd.read_csv("../data/meituan_sku_small.csv")
 
+    # owner_df = load_excel("../data/美团-快驿点特价超市(虹桥店)全量商品信息20251109.xlsx").iloc[:1000]
+    # target_df = load_excel("../data/美团-邻侣超市（虹桥中心店）全量商品信息20251109.xlsx").iloc[:1000]
     owner_df = load_excel("../data/美团-快驿点特价超市(虹桥店)全量商品信息20251109.xlsx")
     target_df = load_excel("../data/美团-邻侣超市（虹桥中心店）全量商品信息20251109.xlsx")
     # 打印前几行数据
@@ -283,18 +286,39 @@ async def main():
 
     if LLM_MATCH:
         print("开始LLM匹配...")
-        owner_subset = owner_df.iloc[:100]
+        limiter = RateLimiter(rpm_limit=800, tpm_limit=40000)
 
-        # 创建任务列表
-        tasks = [
-            process_llm_row(i, row, top1_list, top2_list, top3_list)
-            for i, row in owner_subset.iterrows()
-        ]
-        # 并发执行
-        results = await asyncio.gather(*tasks)
+        owner_subset = owner_df  # 这里可以改成 owner_df.iloc[:100] 测试
+        batch_size = 10  # 每批次处理 10 条，可根据速率限制调整
+        delay_seconds = 5  # 每批之间等待 3 秒，可根据 API 限速调整
+
+        all_results = []
+
+        for start_idx in range(0, len(owner_subset), batch_size):
+            est_tokens = batch_size * 700
+            await limiter.record_call(est_tokens)
+
+            end_idx = min(start_idx + batch_size, len(owner_subset))
+            batch = owner_subset.iloc[start_idx:end_idx]
+            print(f"正在处理第 {start_idx}~{end_idx - 1} 条（共 {len(owner_subset)} 条）...")
+
+            # 按批次创建任务
+            tasks = [
+                process_llm_row(i, row, top1_list, top2_list, top3_list)
+                for i, row in batch.iterrows()
+            ]
+
+            # 阻塞等待本批结果（而不是一次性 gather 所有）
+            batch_results = await asyncio.gather(*tasks)
+            all_results.extend(batch_results)
+
+            # 每批之间延迟，防止速率限制
+            if end_idx < len(owner_subset):
+                print(f"等待 {delay_seconds} 秒以避免触发频率限制...")
+                await asyncio.sleep(delay_seconds)
 
         # 更新 DataFrame
-        for i, val in results:
+        for i, val in all_results:
             owner_df.at[i, '相似商品'] = val
 
     output_path = "../output/补充Top3相似商品" + str(uuid.uuid4()) + ".xlsx"

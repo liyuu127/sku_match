@@ -4,9 +4,9 @@ import asyncio
 # 设置langsmith环境配置
 import os
 
-os.environ["LANGSMITH_API_KEY"] = "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"
-os.environ["LANGSMITH_PROJECT"] = "sku_match"
-os.environ["LANGSMITH_TRACING"] = "true"
+# os.environ["LANGSMITH_API_KEY"] = "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"
+# os.environ["LANGSMITH_PROJECT"] = "sku_match"
+# os.environ["LANGSMITH_TRACING"] = "true"
 from langchain_openai import ChatOpenAI
 
 qwen3_8B = ChatOpenAI(
@@ -55,19 +55,18 @@ top3_candidate：{top3_candidate}
 "rank_index": int.Returns the index of the candidate product information that matches the description. If it is top1_candidate, return 1; if it is top2_candidate, return 2; if it is top3_candidate, return 3; otherwise, return 0.,
 """
 
-model = qwen3_8B.with_structured_output(RankSelect).with_retry(stop_after_attempt=3)
+model = qwen3_8B.with_structured_output(RankSelect).with_retry(stop_after_attempt=2)
 
 from langchain_core.messages import (
     AIMessage,
     HumanMessage,
 )
 
-REQUEST_INTERVAL = 0.8
 
+REQUEST_INTERVAL = 1
 
 async def llm_rank(product_name, top1, top2, top3) -> int:
     await asyncio.sleep(REQUEST_INTERVAL)  # 限速控制
-
     print("正在处理：", product_name)
     prompt_format = rank_prompt.format(origin_product=product_name, top1_candidate=top1,
                                        top2_candidate=top2, top3_candidate=top3)
@@ -81,9 +80,7 @@ async def llm_rank(product_name, top1, top2, top3) -> int:
             return -1
     # 捕获所有错误，打印信息
     except Exception as e:
-        import traceback
         print(f"商品：{product_name} 发生异常: {e}")
-        traceback.print_exc()
         return -1
     return index
 
