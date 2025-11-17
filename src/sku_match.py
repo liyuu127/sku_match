@@ -266,8 +266,10 @@ async def main():
 
     # owner_df = load_excel("../data/美团-快驿点特价超市(虹桥店)全量商品信息20251109.xlsx").iloc[:1000]
     # target_df = load_excel("../data/美团-邻侣超市（虹桥中心店）全量商品信息20251109.xlsx").iloc[:1000]
-    owner_df = load_excel("../data/美团-快驿点特价超市(虹桥店)全量商品信息20251109.xlsx")
-    target_df = load_excel("../data/美团-邻侣超市（虹桥中心店）全量商品信息20251109.xlsx")
+    # owner_df = load_excel("../data/美团-快驿点特价超市(虹桥店)全量商品信息20251109.xlsx")
+    # target_df = load_excel("../data/美团-邻侣超市（虹桥中心店）全量商品信息20251109.xlsx")
+    owner_df = load_excel("../data/sku_kyd_sampled.xlsx")
+    target_df = load_excel("../data/sku_ll_dedup.xlsx")
     # 打印前几行数据
     print(owner_df.head())
     print(f"待匹配数据加载完成，共{len(owner_df)}条记录")

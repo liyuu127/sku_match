@@ -85,7 +85,7 @@ def extract_brand_from_tokens(text_to_search: str, brand_dictionary: Set[str]) -
 
 
 # 读取brand.txt解析为列表
-BRAND_DICTIONARY = set(line.strip() for line in open("../data/brand.txt", encoding="utf-8"))
+BRAND_DICTIONARY = set(line.strip() for line in open("../../data/brand.txt", encoding="utf-8"))
 print("已加载品牌列表：", BRAND_DICTIONARY)
 
 
@@ -329,7 +329,7 @@ async def main():
     # ele_df = pd.read_csv("../data/elme_sku_small.csv")
     # owner_df = pd.read_csv("../data/meituan_sku_small.csv")
 
-    owner_df = load_excel("../output/附件1_补充Top3相似商品（ID-名称组合）6888d2b1-c459-46e3-acd1-18727e8b35dd.xlsx")
+    owner_df = load_excel("../../output/附件1_补充Top3相似商品（ID-名称组合）6888d2b1-c459-46e3-acd1-18727e8b35dd.xlsx")
     # 打印前几行数据
     print(owner_df.head())
 
