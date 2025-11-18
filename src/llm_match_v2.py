@@ -1,22 +1,17 @@
 # 使用langgraph接入大模型，使用大模型判断是否相似
 # 输入商品名称和top3商品名称，输入相似的结果
 import asyncio
+from typing import Tuple, Any
+
 from opik import configure
 from opik.integrations.langchain import OpikTracer
 
+from LLM import qwen3_8B, qwen3_30b_instruct, GLM4_9B
 from Limter import RateLimiter
 from utils import pandas_str_to_series
 
 configure(api_key="dHhF5jDOpifAMNJH9UalSjR0o", workspace="yu-li")
 opik_tracer = OpikTracer(project_name="sku_match")
-from langchain_openai import ChatOpenAI
-
-qwen3_8B = ChatOpenAI(
-    model="Qwen/Qwen3-8B",
-    base_url="https://api.siliconflow.cn/v1",
-    api_key="sk-idaudysppselrwglygkbtatkregsbxhaxypaeulbfpavrals",
-
-)
 
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
@@ -37,13 +32,16 @@ class MatchSelect(BaseModel):
 
 
 rank_prompt = """
-你是一个电商运营专家，请你根据输入的商品描述信息在多个候选商品描述中选择描述一致的编号值。
+你是一个电商运营专家，请你根据输入的商品描述信息在多个候选商品描述中选择描述一致的索引值。
+
+<Task>
 你需要按照下面步骤进行思考处理和返回：
-- 接收 origin_product、top1_candidate、top2_candidate、top3_candidate 四个商品信息描述，origin_product 为原始商品信息、top*_candidate 为origin_product的候选匹配商品信息。
-- 每个商品信息均包含品牌、描述、商品名、规格数量4部分信息，如“百事食品乐事 意大利香浓红烩味原切马铃薯片 40g_袋”可提取品牌为百事、描述意大利香浓红烩味原切马铃薯片、商品名为薯片、规格数量为40g_袋。
-- 首先提取 origin_product 输入商品的品牌、描述、商品名、规格数量信息。
-- 依次对输入的候选商品信息 top1_candidate,top2_candidate,top3_candidate 依次提取商品的品牌、描述、商品名、规格数量信息并和origin_product提取信息按照4部分进行匹配比对。
-- 全面分析思考，选出与origin_product描述一致的候选商品编号（如，1，2，3），需要特别注意，如果候选商品与origin_product都不匹配，请返回0。
+1. 接收 origin_product、top1_candidate、top2_candidate、top3_candidate 四个商品信息描述，origin_product 为原始商品信息、top*_candidate 为origin_product的候选匹配商品信息。
+2. 每个商品信息均包含品牌、描述、商品名、规格数量4部分信息，例如输入“百事食品乐事 意大利香浓红烩味原切马铃薯片 40g_袋”，可提取品牌为百事、描述为意大利香浓红烩味原切马铃薯片、商品名为薯片、规格数量为40g_袋。
+3. 首先提取 origin_product 输入商品的品牌、描述、商品名、规格数量信息。
+4. 依次对输入的候选商品信息 top1_candidate,top2_candidate,top3_candidate 依次提取商品的品牌、描述、商品名、规格数量信息并和origin_product提取信息按照4部分进行匹配比对。
+5. 全面分析思考，选出与origin_product描述一致的候选商品编号（如，1，2，3），需要特别注意，如果候选商品与origin_product都不匹配，请返回0。
+</Task>
 
 以下是输入信息：
 <products_info>
@@ -53,20 +51,24 @@ top2_candidate：{top2_candidate}
 top3_candidate：{top3_candidate}
 </products_info>
 
-以下是origin_product和候选商品不匹配的举例情况，任意一种情况不匹配，候选商品则不匹配：
-1. candidate信息为空。
-2. 商品品牌不一致，origin_product识别品牌为可口，candidate识别为品牌为百事。
-3. 商品数量规格不一致，origin_product识别规格为250ml,candidate识别规格为300ml，商品数量规则匹配需要满足数量匹配且规格大小匹配；规格可包括L、kg、千克、盒、件、片、条等市面计量单位，如没有说明默认数量为1。
-4. 商品名语义不符合，origin_product识别为识字卡，candidate识别为挪车卡。
-5. 商品描述有冲突，origin_product识别描述冬季保暖，candidate识别描述为夏季防晒。
-6. 商品信息整体语义冲突，origin_product商品信息为小型便携式冲牙器，candidate商品信息为家用取暖器暖风机。
+<Guidelines>
+以下是origin_product和候选商品不匹配的举例情况，任意一种情况不匹配，当前判断的候选商品则不匹配：
+1. 商品品牌不一致，例如origin_product识别品牌为可口，candidate识别为品牌为百事；评判时要求商品品牌不必完全相同，部分品牌会带有商品信息，如乌苏啤酒;语义相同也视为一致，例如乌苏与乌苏啤酒视为品牌一致。
+2. 商品数量规格不一致，origin_product识别规格为250ml,candidate识别规格为300ml，商品数量规则匹配需要满足数量匹配且规格大小匹配；规格可包括L、kg、千克、盒、件、片、条等市面计量单位，如没有说明默认数量为1；评判时注意抑语义相同及规格一致，如1L和1000ml为一致；个、袋、盒、瓶等单个包装规格在整体语义下也可一致。
+3. 商品名语义不一致，origin_product识别为识字卡，candidate识别为挪车卡；评断时名称不同但语义相同时视为一致，对比双方完全不是同一类型商品才会判断为不一致。
+4. 商品描述完全不一致，origin_product识别描述冬季保暖羽绒服，candidate识别描述为夏季防晒衣；评判时要求语义偏移或不同不视为不一致，只有完全冲突时才视为不匹配，如冬天与夏天，辣味与甜味。
+</Guidelines>
 
+<Output Format>
 请使用以下键值以有效的 JSON 格式进行响应：
-"match_index": int. 返回匹配 origin_product 商品的候选商品编号. 如果是 top1_candidate 返回1;如果是top2_candidate 返回2;如果是 top3_candidate 返回3;不匹配或其他情况返回0。
+"match_index": int. 返回匹配 origin_product 商品的候选商品索引. 如果是top1_candidate返回1; 如果是top2_candidate返回2; 如果是top3_candidate返回3；不匹配或其他情况返回0。,
 "match_reason":str. 返回匹配结果过程的思考原因，需要体现对输入信息的处理、比对、分析等过程。
+</Output Format>
 """
 
-model = qwen3_8B.with_structured_output(MatchSelect).with_retry(stop_after_attempt=2)
+# model = qwen3_8B.with_structured_output(MatchSelect).with_retry(stop_after_attempt=2)
+# model = qwen3_30b_instruct.with_structured_output(MatchSelect).with_retry(stop_after_attempt=2)
+model = GLM4_9B.with_structured_output(MatchSelect).with_retry(stop_after_attempt=2)
 
 from langchain_core.messages import (
     AIMessage,
@@ -97,7 +99,12 @@ async def llm_rank(product_name, top1, top2, top3) -> tuple[int, str]:
     return index, reason
 
 
-async def process_llm_row(i, row, top1_list, top2_list, top3_list) -> tuple[int, str, str]:
+async def process_llm_row(i, row, top1_list, top2_list, top3_list) -> tuple[Any, int, str] | tuple[Any, Any, str] | \
+                                                                      tuple[Any, None, str] | tuple[Any, str, str]:
+    # 判断是否top1条码相同，相同忽略
+    if top1_list[i] is not None and str(top1_list[i].条码) == str(row.条码):
+        return i, 1, "条码一致"
+
     idx, reason = await llm_rank(row.商品名称,
                                  top1_list[i].商品名称 if top1_list[i] is not None else "",
                                  top2_list[i].商品名称 if top2_list[i] is not None else "",

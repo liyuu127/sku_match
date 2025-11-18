@@ -56,7 +56,7 @@ async def main():
     if LLM_MATCH:
         await llm_match_fill(owner_df, top1_list, top2_list, top3_list)
 
-    output_path = "../output/top3相似_92" + str(uuid.uuid4()) + ".xlsx"
+    output_path = "../output/top3相似_GLM4_9B" + str(uuid.uuid4()) + ".xlsx"
     await save_excel_async(owner_df, output_path)
 
     end_time = time.time()
