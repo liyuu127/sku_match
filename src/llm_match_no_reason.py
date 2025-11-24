@@ -24,14 +24,11 @@ class MatchSelect(BaseModel):
     """Model for match top rank. Provide json constraints."""
 
     match_index: int = Field(
-        description="返回匹配 origin_product 商品的候选商品编号. 如果是 top1_candidate 返回 1; 如果是 top2_candidate 返回 2; 如果是 top3_candidate 返回 3；不匹配或其他情况返回0。",
-    )
-    match_reason: str = Field(
-        description="返回匹配结果过程的思考原因，需要体现对输入信息的处理、比对、分析等过程。",
+        description="返回origin_product描述一致的候选商品索引。如果是top1_candidate返回1; 如果是top2_candidate返回2; 如果是top3_candidate返回3；没有候选商品匹配或其他情况返回0。",
     )
 
 
-rank_prompt = """
+rank_prompt_no_reason = """
 你是一个电商运营专家，请你根据输入的商品描述信息在多个候选商品中选择描述为同一款商品类型的索引值。
 
 <Task>
@@ -72,9 +69,8 @@ top3_candidate：{top3_candidate}
 </products_info>
 
 <Output Format>
-请使用以下键值以有效的 JSON 格式进行响应：
+请严格按照以下键值以有效的 JSON 格式进行返回：
 "match_index": int. 返回origin_product描述一致的候选商品索引。 如果是top1_candidate返回1; 如果是top2_candidate返回2; 如果是top3_candidate返回3；没有候选商品匹配或其他情况返回0。
-"match_reason":str. 返回匹配结果过程的思考原因，需要体现对输入信息的处理、比对、分析等过程。
 </Output Format>
 
 <Critical Reminder>
@@ -86,8 +82,8 @@ top3_candidate：{top3_candidate}
 """
 
 # model = qwen3_8B.with_structured_output(MatchSelect).with_retry(stop_after_attempt=2)
-model = qwen3_30b_instruct.with_structured_output(MatchSelect).with_retry(stop_after_attempt=2)
-# model = GLM4_9B.with_structured_output(MatchSelect).with_retry(stop_after_attempt=2)
+# model = qwen3_30b_instruct.with_structured_output(MatchSelect).with_retry(stop_after_attempt=2)
+model = GLM4_9B.with_structured_output(MatchSelect).with_retry(stop_after_attempt=2)
 
 from langchain_core.messages import (
     AIMessage,
@@ -97,47 +93,47 @@ from langchain_core.messages import (
 REQUEST_INTERVAL = 1
 
 
-async def llm_rank(product_name, top1, top2, top3) -> tuple[int, str]:
+async def llm_rank(product_name, top1, top2, top3) -> int:
     await asyncio.sleep(REQUEST_INTERVAL)  # 限速控制
     print(f"正在处理：product_name:{product_name}, top1:{top1}, top2:{top2}, top3:{top3}")
-    prompt_format = rank_prompt.format(origin_product=product_name, top1_candidate=top1,
-                                       top2_candidate=top2, top3_candidate=top3)
+    prompt_format = rank_prompt_no_reason.format(origin_product=product_name, top1_candidate=top1,
+                                                 top2_candidate=top2, top3_candidate=top3)
 
     try:
         rankSelect = await asyncio.wait_for(
             model.ainvoke([HumanMessage(content=prompt_format)], config={"callbacks": [opik_tracer]}), timeout=60)
 
-        index, reason = rankSelect.match_index, rankSelect.match_reason
+        index = rankSelect.match_index
         # 判断index是否是0，1，2，3，  如果不是返回-1
         if index not in [0, 1, 2, 3]:
-            return -1, reason
+            return -1
     # 捕获所有错误，打印信息
     except Exception as e:
         print(f"商品：{product_name} 发生异常: {e}")
-        return -1, ""
-    return index, reason
+        return -1
+    return index
 
 
-async def process_llm_row(i, row, top1_list, top2_list, top3_list) -> tuple[Any, int, str] | tuple[Any, Any, str] | \
-                                                                      tuple[Any, None, str] | tuple[Any, str, str]:
+async def process_llm_row(i, row, top1_list, top2_list, top3_list) -> tuple[Any, int] | tuple[Any, Any] | \
+                                                                      tuple[Any, None] | tuple[Any, str]:
     # # 判断是否top1条码相同，相同忽略
     # if top1_list[i] is not None and str(row.条码).strip() not in ('', 'nan', 'None') and str(top1_list[i].条码) == str(
     #         row.条码):
     #     return i, 1, "条码一致"
 
-    idx, reason = await llm_rank(row.商品名称,
-                                 top1_list[i].商品名称 if top1_list[i] is not None else "",
-                                 top2_list[i].商品名称 if top2_list[i] is not None else "",
-                                 top3_list[i].商品名称 if top3_list[i] is not None else "")
+    idx = await llm_rank(row.商品名称,
+                         top1_list[i].商品名称 if top1_list[i] is not None else "",
+                         top2_list[i].商品名称 if top2_list[i] is not None else "",
+                         top3_list[i].商品名称 if top3_list[i] is not None else "")
     if idx == 1:
-        return i, top1_list[i], reason
+        return i, top1_list[i]
     elif idx == 2:
-        return i, top2_list[i], reason
+        return i, top2_list[i]
     elif idx == 3:
-        return i, top3_list[i], reason
+        return i, top3_list[i]
     elif idx == 0:
-        return i, None, reason
-    return i, "error", reason
+        return i, None
+    return i, "error"
 
 
 async def llm_match_fill(owner_df, top1_list, top2_list, top3_list):
@@ -170,9 +166,8 @@ async def llm_match_fill(owner_df, top1_list, top2_list, top3_list):
             print(f"等待 {delay_seconds} 秒以避免触发频率限制...")
             await asyncio.sleep(delay_seconds)
     # 更新 DataFrame
-    for i, val, reason in all_results:
+    for i, val in all_results:
         owner_df.at[i, '相似商品'] = val
-        owner_df.at[i, '相似商品原因'] = reason
     # 尝试重试
     await retry_error_rows(owner_df, limiter, 10, 10)
 
@@ -191,7 +186,7 @@ async def handle_error_row(index, row, limiter, df):
     top3 = similar_product3.商品名称 if similar_product3 is not None else ""
 
     # 模型排序
-    idx, reason = await llm_rank(row.商品名称, top1, top2, top3)
+    idx = await llm_rank(row.商品名称, top1, top2, top3)
     print(f"  匹配结果：{idx}")
 
     if idx == 1:
@@ -204,7 +199,6 @@ async def handle_error_row(index, row, limiter, df):
         df.at[index, '相似商品'] = None
     else:
         df.at[index, '相似商品'] = 'error'  # 仍然是错误，等待下一轮 retry
-    df.at[index, '相似商品原因'] = reason
 
 
 async def run_retry_batch(df, limiter, batch_size=10):

@@ -1,22 +1,14 @@
 import re
-import asyncio
 import uuid
 from io import BytesIO
-from uuid import UUID
 
 import pandas as pd
 from typing import List, Set, Tuple, Any
-import jieba
-from concurrent.futures import ThreadPoolExecutor
+
 import time
 import asyncio
-import functools
 
-from pandas import Series
-
-from Limter import RateLimiter
-from llm_match import process_llm_row
-from llm_match_v2 import llm_match_fill
+from llm_match_no_reason import llm_match_fill
 from sku_filter import preprocess_candidate_tokens, process_owner_data_async
 from utils import load_excel, save_excel_async, download_image
 from openpyxl import Workbook
@@ -104,7 +96,7 @@ def pic_download(llm_match_df: pd.DataFrame, output_path):
 
         for col_name in llm_match_df.columns:
             value = str(row[col_name]) if row[col_name] is not None and row[col_name] not in ["", "nan", "None"] else \
-            row[col_name]
+                row[col_name]
             col_letter = get_column_letter(col_idx)
             # 如果这一列是 image（你指定的需要下载/展示的图片列）
             if col_name in (
@@ -159,7 +151,7 @@ async def main():
     # owner_df = load_excel("../data/美团-快驿点特价超市(虹桥店)全量商品信息20251109.xlsx")
     # target_df = load_excel("../data/美团-邻侣超市（虹桥中心店）全量商品信息20251109.xlsx")
     # owner_df = load_excel("../data/sku_kyd_sampled.xlsx").iloc[:100]
-    owner_df = load_excel("../data/top3相似人工标注数据_需要大模型识别.xlsx")
+    owner_df = load_excel("../data/top3相似人工标注数据_需要大模型识别.xlsx").iloc[:50]
     # owner_df = load_excel("../output/llm_error_df.xlsx")
     target_df = load_excel("../data/附件2-美团邻侣全量去重商品1109.xlsx")
     owner_df = owner_df.drop_duplicates(subset=['商品ID'])

@@ -13,6 +13,8 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 import asyncio
 import functools
+from io import BytesIO
+import requests
 
 # 读取brand.txt解析为列表
 BRAND_DICTIONARY = set(line.strip() for line in open("../data/brand.txt", encoding="utf-8"))
@@ -115,3 +117,15 @@ def pandas_str_to_series(s) -> pd.Series:
     # 3️⃣ 转为 DataFrame
     df = pd.DataFrame([data])
     return df.iloc[0]
+
+
+def download_image(url):
+    """根据 URL 下载图片，返回 BytesIO 对象"""
+    try:
+        r = requests.get(url, timeout=5)
+        if r.status_code == 200:
+            return BytesIO(r.content)
+    except Exception as e:
+        print(e)
+        return None
+    return None

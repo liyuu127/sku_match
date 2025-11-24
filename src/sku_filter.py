@@ -45,12 +45,12 @@ async def calculate_similarity_for_single_product(
     """计算单个商品间相似度"""
     candidate_id = candidate_row.商品ID
     candidate_name = candidate_row.商品名称
-    p_barcode = row.条码
-    candidate_barcode = candidate_row.条码
-    # 条码是否匹配
-    similarity_barcode = calculate_barcode_similarity(p_barcode, candidate_barcode)
-    if similarity_barcode == 1.0:
-        return 1.0, candidate_row
+    # p_barcode = row.条码
+    # candidate_barcode = candidate_row.条码
+    # # 条码是否匹配
+    # similarity_barcode = calculate_barcode_similarity(p_barcode, candidate_barcode)
+    # if similarity_barcode == 1.0:
+    #     return 1.0, candidate_row
     candidate_brand = extract_brand(candidate_name, BRAND_DICTIONARY)
     similarity_tokens = jaccard_similarity(p_tokenize, candidate_tokens)
     similarity_brand = calculate_brand_similarity(p_brand, candidate_brand)
