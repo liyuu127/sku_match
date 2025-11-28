@@ -1,20 +1,19 @@
+import asyncio
 import re
+import time
 import uuid
 from io import BytesIO
+from typing import Any
 
 import pandas as pd
-from typing import List, Set, Tuple, Any
-
-import time
-import asyncio
-
-from llm_match_no_reason import llm_match_fill
-from sku_filter import preprocess_candidate_tokens, process_owner_data_async
-from utils import load_excel, save_excel_async, download_image
+from PIL import Image as PILImage
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image
-from PIL import Image as PILImage
 from openpyxl.utils import get_column_letter
+
+from llm_match_top5 import llm_match_fill
+from sku_filter_top5 import preprocess_candidate_tokens, process_owner_data_async
+from utils import load_excel, save_excel_async, download_image
 
 MAX_CONCURRENCY = 100  # 控制最大并发任务数
 LLM_MATCH = True
@@ -166,27 +165,21 @@ async def main():
     print("饿了么数据预处理完成")
 
     print("开始异步处理匹配任务...")
-    top1_list, top2_list, top3_list = await process_owner_data_async(owner_df, target_df, tokens)
+    top1_list, top2_list, top3_list, top4_list, top5_list = await process_owner_data_async(owner_df, target_df, tokens)
 
     owner_df['相似商品1'] = top1_list
     owner_df['相似商品2'] = top2_list
     owner_df['相似商品3'] = top3_list
+    owner_df['相似商品4'] = top4_list
+    owner_df['相似商品5'] = top5_list
+
     suffix = str(uuid.uuid4())
-    # model_name = "glm4-9b"
-    # model_name = "qwen-3-30b"
-    model_name = "qwen3_235b"
-    prompt_v = "prompt_v2"
-    # prompt_v = "prompt_v1"
-    prefix = "../output/no_reason_top3相似_"
-
-    output_path = prefix + model_name + "_" + prompt_v + "_500_" + suffix + ".xlsx"
-    output_path_nopic = prefix + "nopic_" + model_name + "_" + prompt_v + "_500_" + suffix + ".xlsx"
-    output_path_nollm = prefix + "nollm" + model_name + "_" + prompt_v + "_500_" + suffix + ".xlsx"
-
-    # await save_excel_async(owner_df, output_path_nollm)
-
+    # output_path = "../output/top3相似_qwen3_30B_500_" + suffix + ".xlsx"
+    # output_path_nopic = "../output/nopic_top3相似_qwen3_30B_500_" + suffix + ".xlsx"
+    output_path = "../output/top5相似_glm4_9b_500_" + suffix + ".xlsx"
+    output_path_nopic = "../output/nopic_top5相似_glm4_9b_500_" + suffix + ".xlsx"
     if LLM_MATCH:
-        await llm_match_fill(owner_df, top1_list, top2_list, top3_list)
+        await llm_match_fill(owner_df, top1_list, top2_list, top3_list, top4_list, top5_list)
         # pic_url_fill(owner_df)
         await save_excel_async(owner_df, output_path_nopic)
         # pic_download(owner_df, output_path)

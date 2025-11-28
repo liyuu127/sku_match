@@ -52,6 +52,16 @@ qwen3_235b_thinking = ChatOpenAI(
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     api_key="sk-c2828715cc2b429296c9192679f63180",
 )
+qwen3_235b_instruct = ChatOpenAI(
+    model="qwen3-235b-a22b-instruct-2507",
+    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    api_key="sk-c2828715cc2b429296c9192679f63180",
+)
+qwen3_max = ChatOpenAI(
+    model="qwen3-max",
+    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    api_key="sk-c2828715cc2b429296c9192679f63180",
+)
 qwen3_30b_thinking = ChatOpenAI(
     model="qwen3-30b-a3b-thinking-2507",
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",

@@ -104,7 +104,7 @@ def pic_download(llm_match_df: pd.DataFrame, output_path):
 
         for col_name in llm_match_df.columns:
             value = str(row[col_name]) if row[col_name] is not None and row[col_name] not in ["", "nan", "None"] else \
-            row[col_name]
+                row[col_name]
             col_letter = get_column_letter(col_idx)
             # 如果这一列是 image（你指定的需要下载/展示的图片列）
             if col_name in (
@@ -179,15 +179,24 @@ async def main():
     owner_df['相似商品1'] = top1_list
     owner_df['相似商品2'] = top2_list
     owner_df['相似商品3'] = top3_list
-
     suffix = str(uuid.uuid4())
-    output_path = "../output/top3相似_qwen3_30B_500_" + suffix + ".xlsx"
-    output_path_nopic = "../output/nopic_top3相似_qwen3_30B_500_" + suffix + ".xlsx"
+    # model_name = "glm4-9b"
+    model_name = "qwen-3-30b"
+    # prompt_v = "prompt_v2"
+    prompt_v = "prompt_v3"
+    prefix = "../output/top3相似_"
+
+    output_path = prefix + model_name + "_" + prompt_v + "_500_" + suffix + ".xlsx"
+    output_path_nopic = prefix + "nopic_" + model_name + "_" + prompt_v + "_500_" + suffix + ".xlsx"
+    output_path_nollm = prefix + "nollm" + model_name + "_" + prompt_v + "_500_" + suffix + ".xlsx"
+
+    # await save_excel_async(owner_df, output_path_nollm)
+
     if LLM_MATCH:
         await llm_match_fill(owner_df, top1_list, top2_list, top3_list)
-        pic_url_fill(owner_df)
+        # pic_url_fill(owner_df)
         await save_excel_async(owner_df, output_path_nopic)
-        pic_download(owner_df, output_path)
+        # pic_download(owner_df, output_path)
 
     # output_path = "../output/top3相似_qwen3_30B_500_" + str(uuid.uuid4()) + ".xlsx"
     # await save_excel_async(owner_df, output_path)
